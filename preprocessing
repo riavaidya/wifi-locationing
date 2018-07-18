@@ -1,0 +1,54 @@
+#adding in building names
+wifidata$BUILDINGID <- as.factor(wifidata$BUILDINGID)
+levels(wifidata$BUILDINGID) <- c("TI", "TD", "TC")
+
+valdata$BUILDINGID <- as.factor(valdata$BUILDINGID)
+levels(valdata$BUILDINGID) <- c("TI", "TD", "TC")
+
+#factorizing necessary variables just in case
+wifidata$SPACEID <- as.factor(wifidata$SPACEID)
+valdata$SPACEID <- as.factor(valdata$SPACEID)
+
+#changing time from UNIX to POSIXct
+wifidata$TIMESTAMP <- as.POSIXct(wifidata$TIMESTAMP, 
+                                 origin = "1970-01-01",
+                                 tz = "Europe/Paris")
+
+valdata$TIMESTAMP <- as.POSIXct(valdata$TIMESTAMP, 
+                                origin = "1970-01-01",
+                                tz = "Europe/Paris")
+
+#removes 637 duplicates
+wifidata <- unique(wifidata)
+
+#removing user6
+wifidata <- wifidata[(which(wifidata$USERID != "6")), ]
+
+#changing 100s to -105s (signal = 100 indicates there was no signal)
+for(i in 1:520){
+  wifidata[which(wifidata[,i] == 100), i] = -105
+}
+
+for(i in 1:520){
+  valdata[which(valdata[,i] == 100), i] = -105
+}
+
+#changing everything below -90 to -105 to reduce noise
+wifidata[, 1:520] <- apply(
+  wifidata[,1:520], 2, function(x) ifelse(x < -90, -105, x))
+
+valdata[, 1:520] <- apply(
+  valdata[,1:520], 2, function(x) ifelse(x < -90, -105, x))
+
+#changing everything above -30 to -105 to remove error signals
+wifidata[, 1:520] <- apply(
+  wifidata[,1:520], 2, function(x) ifelse(x > -30, -105, x))
+
+valdata[, 1:520] <- apply(
+  valdata[,1:520], 2, function(x) ifelse(x > -30, -105, x))
+
+#remove columns with variance of 0, removes 55 columns so now there's 404 + 9
+wifidata <- wifidata[-as.numeric(which(apply(wifidata, 2, var) == 0))]
+
+#ensure that validation set exactly matches training dataset
+valclean <- valdata[, which(names(valdata) %in% names(wifidata))]
