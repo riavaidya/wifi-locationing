@@ -1,0 +1,164 @@
+#### importing libraries and data ####
+library(readr)
+library(caret)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(lubridate)
+
+wifidata <- read_csv("UJIndoorLoc/trainingData.csv") #the training dataset
+valdata <- read_csv("UJIndoorLoc/validationData.csv") #the validation dataset
+
+#### 1. pre-preprocessing both datasets ####
+
+#adding in building names
+wifidata$BUILDINGID <- as.factor(wifidata$BUILDINGID)
+levels(wifidata$BUILDINGID) <- c("TI", "TD", "TC")
+
+#changing time from UNIX to POSIXct
+wifidata$TIMESTAMP <- as.POSIXct(wifidata$TIMESTAMP, 
+                                 origin = "1970-01-01",
+                                 tz = "Europe/Paris")
+
+wifidata$DATE <- paste(date(wifidata$TIMESTAMP))
+
+#replacing USERID with height of users in cm
+#create new column for height, retain ID
+# wifidata$USERID <- as.factor(wifidata$USERID)
+# levels(wifidata$USERID) <- c("170", "176", "172", "174", "184",
+#                              "180", "160", "176", "177", "186",
+#                              "176", "158", "174", "173", "174",
+#                              "171", "166", "162")
+# 
+# names(wifidata)[527] <- "HEIGHT"
+# wifidata$HEIGHT <- as.numeric(wifidata$HEIGHT)
+
+#checking for duplicates
+length(which((duplicated(wifidata) == TRUE))) #returns 637
+
+#removes 637 duplicates
+wifidata <- unique(wifidata)
+
+#might as well do it for the validation set?
+valdata <- unique(valdata) #doesn't do anything
+
+#remove columns with variance of 0, removes 55 columns so now there's 465 + 9
+wifidata <- wifidata[ - as.numeric(which(apply(wifidata, 2, var) == 0))]
+
+#creates a new column for variable combining building and floor
+wifidata$BUILDINGFLOOR <- paste(
+  wifidata$BUILDINGID, wifidata$FLOOR, sep = "-")
+
+wifidata$BUILDINGFLOOR <- as.factor(wifidata$BUILDINGFLOOR)
+
+#gives you a map of the buildings
+ggplot(data = wifidata, aes(
+  x = LONGITUDE, y = LATITUDE, col = USERID)) + geom_point()
+
+#### looking at users generally ####
+
+count(wifidata, DATE)
+#before removing user6, after removing duplicates -
+#72.8% of obs are on 2013-06-20
+
+May30 <- wifidata %>% filter(DATE == "2013-05-30")
+#only user 11 was there on May 30
+
+May31 <- wifidata %>% filter(DATE == "2013-05-31")
+#only user 11 was there on May 31
+
+June4 <- wifidata %>% filter(DATE == "2013-06-04")
+#only user 11 was there on June 4
+
+June10 <- wifidata %>% filter(DATE == "2013-06-10")
+#only user 1 was there on June 10
+
+June12 <- wifidata %>% filter(DATE == "2013-06-12")
+#only user 1 was there on June 12
+
+June20 <- wifidata %>% filter(DATE == "2013-06-20")
+#users 2-18 were there on June 20
+
+user2 <- wifidata %>% filter(USERID == 2) 
+#9.33 - 11.48 on 2013-06-20
+
+user3 <- wifidata %>% filter(USERID == 3)
+#11.11 - 11.21 on 2013-06-20
+
+user4 <- wifidata %>% filter(USERID == 4)
+#15.29 - 16.15 on 2013-06-20
+
+user5 <- wifidata %>% filter(USERID == 5)
+#9.40 - 12.13 on 2013-06-20
+
+user7 <- wifidata %>% filter(USERID == 7)
+#9.34 - 12.41 on 2013-06-20
+
+user8 <- wifidata %>% filter(USERID == 8)
+#9.40 - 11.39 on 2013-06-20
+
+#### initial insights - looking for where the errors are ####
+
+#creating a vector to collect row numbers
+badrows <- c()
+
+#adding all rows with WAP signal > -30 to badrows vector (these are basically errors)
+for(i in 1:nrow(wifidata)){
+  if(max(wifidata[i,1:520]) > -30){
+    badrows <- c(badrows,i)
+  }
+}
+
+for(i in 1:nrow(valdata)){
+  if(max(valdata[i,1:520]) > -30){
+    badrows <- c(badrows,i)
+  }
+}
+
+#creating a new dataframe with using badrows as an index
+data30 <- wifidata[badrows,]
+data30 <- data30[, 1:520] #keeping only the rows with info on WAPs
+
+# insights:
+# all but one of the bad rows occur on 2013-06-20
+# 97% of bad rows occur on building floor TC-3 or TC-4
+# validation set has no bad rows
+
+count(data30, USERID) #user 6 has 430 errors, user 14 has 51
+count(data30, PHONEID) #user 6 uses phone 19, user 14 uses 7
+
+user6 <- wifidata %>% filter(USERID == 6)
+nrow(user6) #returns 977. so 44% of their datapoints are errors
+
+user14 <- wifidata %>% filter(USERID == 14)
+nrow(user14) #returns 1596. so 3% of their datapoints are errors
+
+#user 6 only spends time on TC3 and TC4
+#user 6 was only there on 2013-06-20 between 9.39 - 11.40
+
+#creating a vector to collect row numbers
+goodrows6 <- c()
+
+#adding all of user6's rows with WAP > -30 to goodrows vector
+for(i in 1:nrow(user6)){
+  if(max(user6[i,1:465]) < -30){
+    goodrows6 <- c(goodrows6,i)
+  }
+}
+
+datagood6 <- user6[goodrows6,] #good rows and bad rows are very similar
+
+#removing user6 is the best way forward
+wifidata <- wifidata[(which(wifidata$USERID != "6")), ]
+
+#### checking which WAPs have zero variances in both datasets ####
+
+valzero <- valdata[as.numeric(which(apply(valdata, 2, var) == 0))]
+
+wifizero <- wifidata[as.numeric(which(apply(wifidata, 2, var) == 0))]
+
+zero_in_val_but_not_train <- names(valzero[,which(names(valzero) %in% names(wifizero) == FALSE)])
+
+zero_in_train_but_not_val <- names(wifizero[,which(names(wifizero) %in% names(valzero) == FALSE)])
+
+zero_in_both <- names(valdata[,which(names(valzero) %in% names(wifizero))])
